@@ -1,0 +1,10 @@
+[project]
+name = "fake-star-detector"
+version = "1.0.0"
+requires-python = ">=3.9"
+dependencies = [
+    "requests",
+    "numpy",
+    "scipy",
+    "matplotlib",
+]
