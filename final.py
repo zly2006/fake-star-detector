@@ -379,7 +379,7 @@ def generate_verdict(owner, repo, report_data):
 
 ---
 
-**生成工具**: Star Manipulation Detector v2.0  
+**生成工具**: https://github.com/zly2006/fake-star-detector# v2.0  
 **分析时间**: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}  
 **报告格式**: Markdown
 

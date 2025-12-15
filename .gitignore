@@ -4,6 +4,6 @@ __pycache__/
 *.py[oc]
 .venv/
 venv/
-*.png
+/visualization*.png
 /report*.json
 .DS_Store
