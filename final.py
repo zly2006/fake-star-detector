@@ -3,15 +3,17 @@
 Comprehensive Star Manipulation Detection Tool
 Usage: python3 final.py <owner> <repo>
 """
-import sys
 import os
-import re
-import requests
-from datetime import datetime
+import sys
 from collections import Counter, defaultdict
-import numpy as np
-from scipy.cluster.hierarchy import linkage, fcluster
+from datetime import datetime
+
 import matplotlib
+import numpy as np
+import requests
+from scipy import stats
+from scipy.cluster.hierarchy import linkage, fcluster
+
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 import json
@@ -74,18 +76,34 @@ def create_visualization(owner, repo, report_data, stargazers_data, intervals_mi
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
-    # Plot 2: Cluster Visualization
+    # Plot 2: Cluster Visualization (sorted by size)
     ax2 = axes[0, 1]
-    colors = plt.cm.Set3(np.linspace(0, 1, max_clusters))
+    
+    # Get cluster info and sort by count
+    cluster_sizes = []
     for cluster_id in range(1, max_clusters + 1):
         cluster_data = intervals_min[clusters == cluster_id]
         if len(cluster_data) > 0:
-            ax2.scatter([cluster_id] * len(cluster_data), cluster_data, 
-                       c=[colors[cluster_id-1]], alpha=0.6, s=50)
-    ax2.set_xlabel('Cluster ID')
+            cluster_sizes.append((cluster_id, len(cluster_data)))
+    cluster_sizes.sort(key=lambda x: x[1], reverse=True)
+    
+    # Create position mapping
+    position_map = {cid: pos for pos, (cid, _) in enumerate(cluster_sizes, 1)}
+    
+    colors = plt.cm.Set3(np.linspace(0, 1, max_clusters))
+    for cluster_id, count in cluster_sizes:
+        cluster_data = intervals_min[clusters == cluster_id]
+        pos = position_map[cluster_id]
+        ax2.scatter([pos] * len(cluster_data), cluster_data, 
+                   c=[colors[cluster_id-1]], alpha=0.6, s=50,
+                   label=f'C{cluster_id} (n={count})')
+    
+    ax2.set_xlabel('Cluster (sorted by size)')
     ax2.set_ylabel('Interval (minutes)')
-    ax2.set_title('Hierarchical Clustering Results')
+    ax2.set_title('Hierarchical Clustering Results (by size)')
     ax2.grid(True, alpha=0.3)
+    if len(cluster_sizes) <= 5:
+        ax2.legend(fontsize=8, loc='upper right')
     
     # Plot 3: Time of Day Distribution
     ax3 = axes[1, 0]
@@ -232,7 +250,23 @@ def generate_verdict(owner, repo, report_data):
 - **平均间隔**: {cluster['mean']:.1f} 分钟
 - **标准差**: {cluster['std']:.1f} 分钟
 - **判定**: {'🔴 极度异常 - 程序自动化' if evidence['time_clustering'] >= 50 else '🟡 轻度异常' if evidence['time_clustering'] > 0 else '🟢 正常'}
+"""
+        
+        # Add Chi-Square Test results if available
+        if 'chi2_p_value' in cluster:
+            verdict_md += f"""
+#### 卡方方差检验 (Chi-Square Test for Variance)
+- **实际标准差**: {cluster['std']:.2f} 分钟
+- **期望标准差** (随机基准): {cluster['expected_std']:.2f} 分钟
+- **χ²统计量**: {cluster['chi2_stat']:.2f}
+- **p值**: {cluster['chi2_p_value']:.4f}
+- **统计意义**: {'🔴 高度显著 (p<0.01) - 数据显著集中，远超随机水平' if cluster['chi2_p_value'] < 0.01 else '🟡 显著 (p<0.05) - 数据呈现集中性' if cluster['chi2_p_value'] < 0.05 else '🟢 数据符合随机分布'}
 
+**检验说明**: 对于随机的时间间隔，标准差应≈均值（指数分布特征）。此检验判断数据是否比随机状态更集中。
+
+"""
+        
+        verdict_md += f"""
 {'**关键发现**: 标准差<5分钟，' + str(int(cluster['percentage'])) + '%的star高度集中！这在统计学上不可能是人类行为，明确指向程序自动化控制。' if evidence['time_clustering'] >= 50 else '**说明**: 时间分布正常，符合人类行为模式。' if evidence['time_clustering'] == 0 else '**说明**: 存在一定规律性。'}
 """
     else:
@@ -242,6 +276,12 @@ def generate_verdict(owner, repo, report_data):
 ### 6. 批量创建分析 ({evidence['bulk_creation']} 分)
 
 - **判定**: {'🔴 异常 - 发现批量创建' if evidence['bulk_creation'] > 0 else '🟢 正常'}
+
+### 7. 集中性检验 ({evidence['anova_significance']} 分) ⭐ 统计证据
+
+- **判定**: {'🔴 高度显著 - 数据极度集中 (p<0.01)' if evidence['anova_significance'] >= 20 else '🟡 显著 - 数据呈现集中性 (p<0.05)' if evidence['anova_significance'] >= 10 else '🟢 数据符合随机分布'}
+
+{'**说明**: 卡方检验证实数据的标准差显著小于随机期望值，说明时间间隔不是自然发生的，具有明确的规律性和可控性，指向自动化程序。' if evidence['anova_significance'] >= 20 else '**说明**: 数据显示一定的集中性，存在规律性倾向。' if evidence['anova_significance'] >= 10 else '**说明**: 数据波动正常，符合自然随机分布。'}
 
 ---
 
@@ -350,6 +390,7 @@ def analyze_repository(owner, repo):
     stargazers = stargazers_r.json() if stargazers_r.status_code == 200 else []
     
     evidence_5_score = 0
+    evidence_7_score = 0  # ANOVA score
     main_cluster_info = {}
     intervals_min = None
     times = None
@@ -387,6 +428,44 @@ def analyze_repository(owner, repo):
             print(f"   🔴 CRITICAL: Automated pattern!")
         elif main_cluster_info['std'] < 10 and main_cluster_info['percentage'] > 30:
             evidence_5_score = 25
+        
+        # Chi-Square Test for Variance: Test if data is more concentrated than random
+        main_cluster_id = sorted_clusters[0][0]
+        main_cluster_data = intervals_min[clusters == main_cluster_id]
+        
+        n = len(main_cluster_data)
+        sample_std = main_cluster_info['std']
+        sample_mean = main_cluster_info['mean']
+        
+        # For random exponential distribution: sigma_0 = mu
+        sigma_0 = sample_mean
+        
+        # Chi-square test statistic
+        # H0: sigma = sigma_0 (data is as random as exponential distribution)
+        # H1: sigma < sigma_0 (data is more concentrated)
+        chi2_stat = (n - 1) * (sample_std ** 2) / (sigma_0 ** 2)
+        
+        # P-value for left-tailed test (we want to know if variance is smaller)
+        p_value = stats.chi2.cdf(chi2_stat, df=n-1)
+        
+        print(f"   ✓ Chi-Square Test: χ²={chi2_stat:.2f}, p={p_value:.4f}")
+        
+        main_cluster_info['chi2_stat'] = float(chi2_stat)
+        main_cluster_info['chi2_p_value'] = float(p_value)
+        main_cluster_info['expected_std'] = float(sigma_0)
+        
+        # Score based on p-value
+        if p_value < 0.001:
+            evidence_7_score = 20
+            print(f"   🔴 SIGNIFICANT: Data highly concentrated (p<0.01)")
+        elif p_value < 0.01:
+            evidence_7_score = 10
+            print(f"   🟡 MODERATE: Data shows concentration (p<0.05)")
+        elif p_value < 0.05:
+            evidence_7_score = 5
+            print(f"   🟡 MODERATE: Data shows concentration (p<0.05)")
+        else:
+            print(f"   🟢 Data concentration not significant")
     else:
         print(f"   ⚠️  Insufficient data")
     
@@ -409,7 +488,7 @@ def analyze_repository(owner, repo):
     
     # Total
     total_score = sum([evidence_1_score, evidence_2_score, evidence_3_score, 
-                      evidence_4_score, evidence_5_score, evidence_6_score])
+                      evidence_4_score, evidence_5_score, evidence_6_score, evidence_7_score])
     
     print(f"\n[6/6] Saving report...")
     
@@ -428,7 +507,7 @@ def analyze_repository(owner, repo):
             'main_cluster': main_cluster_info
         },
         'suspicion_score': total_score,
-        'max_score': 180,
+        'max_score': 200,
         'status': status,
         'evidence_scores': {
             'issue_rate': evidence_1_score,
@@ -436,7 +515,8 @@ def analyze_repository(owner, repo):
             'fork_rate': evidence_3_score,
             'bot_commits': evidence_4_score,
             'time_clustering': evidence_5_score,
-            'bulk_creation': evidence_6_score
+            'bulk_creation': evidence_6_score,
+            'anova_significance': evidence_7_score
         }
     }
     
@@ -453,7 +533,7 @@ def analyze_repository(owner, repo):
     generate_verdict(owner, repo, report)
     
     print(f"\n{'='*70}")
-    print(f"📊 FINAL SCORE: {total_score}/180")
+    print(f"📊 FINAL SCORE: {total_score}/200")
     print(f"STATUS: {status}")
     print('='*70)
 
