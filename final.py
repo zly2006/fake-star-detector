@@ -7,7 +7,6 @@ import sys
 import os
 import re
 import requests
-import time
 from datetime import datetime
 from collections import Counter, defaultdict
 import numpy as np
@@ -37,142 +36,92 @@ def get_total_count_from_search(owner, repo, item_type):
         if r.status_code == 200:
             return r.json().get('total_count', 0)
         else:
-            print(f"   ⚠️  Search API error for {item_type}: {r.status_code}")
             return 0
-    except Exception as e:
-        print(f"   ⚠️  Error counting {item_type}: {e}")
+    except:
         return 0
 
-def create_visualization(owner, repo, report_data):
-    """Create 4-panel visualization"""
+def create_visualization(owner, repo, report_data, stargazers_data, intervals_min, times, clusters, max_clusters):
+    """Create 4-panel visualization - EXACTLY as specified"""
     print(f"\n[7/8] Creating visualization...")
     
     metrics = report_data['metrics']
+    main_cluster = metrics.get('main_cluster', {})
     
+    # Calculate half-hour peak
+    star_minutes = [t.minute for t in times]
+    near_half = sum(1 for m in star_minutes if 25 <= m <= 35)
+    half_hour_pct = near_half / len(times) * 100
+    
+    # Create figure
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
-    fig.suptitle(f'Star Manipulation Analysis - {owner}/{repo}', 
+    fig.suptitle(f'Star Manipulation Evidence - {owner}/{repo}', 
                  fontsize=16, fontweight='bold')
     
-    # Panel 1: Metrics Bar Chart
+    # Plot 1: Interval Distribution
     ax1 = axes[0, 0]
-    metric_names = ['Fork Rate\n(%)', 'Issue Rate\n(%)', 'PR Rate\n(%)', 'Bot Commits\n(%)']
-    metric_values = [
-        metrics['fork_rate'],
-        metrics['issue_rate'],
-        metrics['pr_rate'],
-        metrics['bot_commit_ratio']
-    ]
-    colors = ['red' if v < 8 else 'green' for v in [metric_values[0]]] + \
-             ['red' if v < 2 else 'green' for v in metric_values[1:3]] + \
-             ['red' if v > 50 else 'green' for v in [metric_values[3]]]
+    ax1.hist(intervals_min, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+    ax1.axvline(main_cluster['mean'], color='red', linestyle='--', linewidth=2,
+               label=f"Main cluster: {main_cluster['mean']:.1f} min")
+    ax1.set_xlabel('Time Interval (minutes)')
+    ax1.set_ylabel('Frequency')
+    ax1.set_title('Star Time Interval Distribution')
+    ax1.legend()
+    ax1.grid(True, alpha=0.3)
     
-    bars = ax1.bar(metric_names, metric_values, color=colors, alpha=0.7, edgecolor='black')
-    ax1.set_ylabel('Percentage (%)')
-    ax1.set_title('Key Metrics Comparison')
-    ax1.axhline(y=8, color='orange', linestyle='--', alpha=0.5, label='Fork threshold')
-    ax1.axhline(y=50, color='red', linestyle='--', alpha=0.5, label='Bot threshold')
-    ax1.legend(fontsize=8)
-    ax1.grid(True, alpha=0.3, axis='y')
-    
-    # Add value labels on bars
-    for bar, val in zip(bars, metric_values):
-        height = bar.get_height()
-        ax1.text(bar.get_x() + bar.get_width()/2., height,
-                f'{val:.1f}%', ha='center', va='bottom', fontsize=9)
-    
-    # Panel 2: Clustering Info
+    # Plot 2: Cluster Visualization
     ax2 = axes[0, 1]
-    ax2.axis('off')
+    colors = plt.cm.Set3(np.linspace(0, 1, max_clusters))
+    for cluster_id in range(1, max_clusters + 1):
+        cluster_data = intervals_min[clusters == cluster_id]
+        if len(cluster_data) > 0:
+            ax2.scatter([cluster_id] * len(cluster_data), cluster_data, 
+                       c=[colors[cluster_id-1]], alpha=0.6, s=50)
+    ax2.set_xlabel('Cluster ID')
+    ax2.set_ylabel('Interval (minutes)')
+    ax2.set_title('Hierarchical Clustering Results')
+    ax2.grid(True, alpha=0.3)
     
-    if 'main_cluster' in metrics and metrics['main_cluster']:
-        cluster = metrics['main_cluster']
-        cluster_text = f"""
-Time Clustering Analysis
-{'='*30}
-
-Main Cluster Statistics:
-  • Size: {cluster['count']} samples
-  • Percentage: {cluster['percentage']:.1f}%
-  • Mean Interval: {cluster['mean']:.1f} min
-  • Std Deviation: {cluster['std']:.1f} min
-
-Interpretation:
-  {'🔴 CRITICAL' if cluster['std'] < 5 else '🟢 NORMAL'}
-  
-  {'Standard deviation < 5 minutes' if cluster['std'] < 5 else 'Normal variation pattern'}
-  {'indicates automated behavior!' if cluster['std'] < 5 else ''}
-  
-  {'Human behavior typically shows' if cluster['std'] < 5 else ''}
-  {'std > 50 minutes' if cluster['std'] < 5 else ''}
-        """
-    else:
-        cluster_text = "\n\nInsufficient data for\nclustering analysis"
-    
-    ax2.text(0.1, 0.5, cluster_text, fontsize=10, family='monospace',
-            verticalalignment='center')
-    
-    # Panel 3: Score Breakdown
+    # Plot 3: Time of Day Distribution
     ax3 = axes[1, 0]
-    evidence = report_data['evidence_scores']
-    categories = ['Issue\nRate', 'PR\nRate', 'Fork\nRate', 'Bot\nCommits', 'Time\nCluster', 'Bulk\nCreate']
-    scores = [
-        evidence['issue_rate'],
-        evidence['pr_rate'],
-        evidence['fork_rate'],
-        evidence['bot_commits'],
-        evidence['time_clustering'],
-        evidence['bulk_creation']
-    ]
-    max_scores = [30, 20, 25, 30, 50, 25]
-    
-    x = np.arange(len(categories))
-    width = 0.35
-    
-    bars1 = ax3.bar(x - width/2, scores, width, label='Actual Score', 
-                   color='red', alpha=0.7, edgecolor='black')
-    bars2 = ax3.bar(x + width/2, max_scores, width, label='Max Score',
-                   color='lightgray', alpha=0.5, edgecolor='black')
-    
-    ax3.set_ylabel('Score')
-    ax3.set_title('Evidence Score Breakdown')
-    ax3.set_xticks(x)
-    ax3.set_xticklabels(categories, fontsize=9)
-    ax3.legend()
+    hours = [t.hour for t in times]
+    hour_counts = Counter(hours)
+    ax3.bar(hour_counts.keys(), hour_counts.values(), color='coral', edgecolor='black')
+    ax3.set_xlabel('Hour of Day')
+    ax3.set_ylabel('Number of Stars')
+    ax3.set_title('Star Distribution by Hour')
+    ax3.set_xticks(range(24))
     ax3.grid(True, alpha=0.3, axis='y')
     
-    # Panel 4: Summary
+    # Plot 4: Key Metrics
     ax4 = axes[1, 1]
     ax4.axis('off')
     
-    total_score = report_data['suspicion_score']
-    max_score = report_data['max_score']
-    status = report_data['status']
+    # Determine status indicators
+    issue_status = "🔴 < 1%" if metrics['issue_rate'] < 1 else "🟢 OK"
+    pr_status = "🔴 < 1%" if metrics['pr_rate'] < 1 else "🟢 OK"
+    fork_status = "🔴 < 8%" if metrics['fork_rate'] < 8 else "🟢 OK"
+    bot_status = "🔴 > 80%" if metrics['bot_commit_ratio'] > 80 else "🟢 OK"
     
-    summary_text = f"""
-ANALYSIS SUMMARY
-{'='*40}
+    metrics_text = f"""
+KEY EVIDENCE SUMMARY
 
-Repository: {owner}/{repo}
-Analysis Date: {report_data['analysis_date'][:10]}
+Repository Stats:
+• Total Stars: {metrics['stars']}
+• Issue Rate: {metrics['issue_rate']:.2f}% ({issue_status})
+• PR Rate: {metrics['pr_rate']:.2f}% ({pr_status})
+• Fork Rate: {metrics['fork_rate']:.1f}% ({fork_status})
+• Bot Commits: {metrics['bot_commit_ratio']:.0f}% ({bot_status})
 
-Stars: {metrics['stars']}
-Forks: {metrics['forks']} ({metrics['fork_rate']:.1f}%)
-Issues: {metrics['total_issues']} ({metrics['issue_rate']:.2f}%)
-PRs: {metrics['total_prs']} ({metrics['pr_rate']:.2f}%)
+Time Pattern Analysis:
+• Main Cluster: {main_cluster['percentage']:.1f}%
+• Mean Interval: {main_cluster['mean']:.1f} min
+• Std Deviation: {main_cluster['std']:.1f} min
+• Half-hour Peak: {half_hour_pct:.0f}%
 
-SUSPICION SCORE: {total_score}/{max_score}
-STATUS: {status}
-
-Evidence Summary:
-  • Issue Rate: {'FAIL' if evidence['issue_rate'] > 0 else 'PASS'}
-  • PR Rate: {'FAIL' if evidence['pr_rate'] > 0 else 'PASS'}
-  • Fork Rate: {'FAIL' if evidence['fork_rate'] > 0 else 'PASS'}
-  • Bot Commits: {'FAIL' if evidence['bot_commits'] > 0 else 'PASS'}
-  • Time Clustering: {'FAIL' if evidence['time_clustering'] > 0 else 'PASS'}
-  • Bulk Creation: {'FAIL' if evidence['bulk_creation'] > 0 else 'PASS'}
+Suspicion Score: {report_data['suspicion_score']}/{report_data['max_score']}
     """
     
-    ax4.text(0.1, 0.5, summary_text, fontsize=10, family='monospace',
+    ax4.text(0.1, 0.5, metrics_text, fontsize=11, family='monospace',
             verticalalignment='center')
     
     plt.tight_layout()
@@ -189,7 +138,6 @@ def generate_verdict(owner, repo, report_data):
     metrics = report_data['metrics']
     evidence = report_data['evidence_scores']
     total_score = report_data['suspicion_score']
-    status = report_data['status']
     
     # Determine verdict level
     if total_score >= 100:
@@ -263,7 +211,7 @@ def generate_verdict(owner, repo, report_data):
 
 - **实际值**: {metrics['bot_commit_ratio']:.0f}%
 - **正常值**: <20%
-- **判定**: {'🔴 严重异常 - Bot刷活跃度' if evidence['bot_commits'] >= 30 else '🟡 轻度异常' if evidence['bot_commits'] > 0 else '�� 正常'}
+- **判定**: {'🔴 严重异常 - Bot刷活跃度' if evidence['bot_commits'] >= 30 else '🟡 轻度异常' if evidence['bot_commits'] > 0 else '🟢 正常'}
 
 {'**说明**: Bot提交占比>80%，明显用于刷活跃度和trending排名。' if evidence['bot_commits'] >= 30 else '**说明**: 无Bot提交，提交记录真实。' if evidence['bot_commits'] == 0 else '**说明**: 少量Bot提交。'}
 
@@ -279,12 +227,7 @@ def generate_verdict(owner, repo, report_data):
 - **标准差**: {cluster['std']:.1f} 分钟
 - **判定**: {'🔴 极度异常 - 程序自动化' if evidence['time_clustering'] >= 50 else '🟡 轻度异常' if evidence['time_clustering'] > 0 else '🟢 正常'}
 
-{'**关键发现**: 标准差<5分钟，44%的star高度集中！这在统计学上不可能是人类行为，明确指向程序自动化控制。' if evidence['time_clustering'] >= 50 else '**说明**: 时间分布正常，符合人类行为模式。' if evidence['time_clustering'] == 0 else '**说明**: 存在一定规律性。'}
-
-**科学依据**:
-- 人类行为的时间间隔标准差通常>50分钟
-- 标准差<10分钟即为可疑
-- 标准差<5分钟基本确定为程序控制
+{'**关键发现**: 标准差<5分钟，' + str(int(cluster['percentage'])) + '%的star高度集中！这在统计学上不可能是人类行为，明确指向程序自动化控制。' if evidence['time_clustering'] >= 50 else '**说明**: 时间分布正常，符合人类行为模式。' if evidence['time_clustering'] == 0 else '**说明**: 存在一定规律性。'}
 """
     else:
         verdict_md += "\n数据不足，无法进行聚类分析。\n"
@@ -293,19 +236,6 @@ def generate_verdict(owner, repo, report_data):
 ### 6. 批量创建分析 ({evidence['bulk_creation']} 分)
 
 - **判定**: {'🔴 异常 - 发现批量创建' if evidence['bulk_creation'] > 0 else '🟢 正常'}
-
-{'**说明**: 发现多个日期存在批量创建高star仓库的行为。' if evidence['bulk_creation'] > 0 else '**说明**: 未发现批量创建行为。'}
-
----
-
-## 📈 评分说明
-
-| 分数范围 | 等级 | 说明 |
-|---------|------|------|
-| 0-30 | 🟢 低 | 正常项目，无明显异常 |
-| 31-60 | 🟡 中 | 存在部分可疑特征 |
-| 61-100 | 🔴 高 | 高度可疑，可能存在刷量 |
-| 100+ | 🔴 极高 | 确认刷量，证据确凿 |
 
 ---
 
@@ -317,66 +247,20 @@ def generate_verdict(owner, repo, report_data):
         verdict_md += f"""
 ### ⚠️  确认存在Star操纵行为
 
-基于多维度证据分析，该仓库存在**明确的Star操纵行为**：
-
-#### 核心证据:
-{'1. ✅ **时间聚类异常** - 标准差' + f"{metrics.get('main_cluster', {}).get('std', 0):.1f}" + '分钟，程序自动化特征明显' if evidence['time_clustering'] >= 50 else ''}
-{'2. ✅ **Bot刷活跃度** - ' + f"{metrics['bot_commit_ratio']:.0f}" + '%的提交是Bot' if evidence['bot_commits'] >= 30 else ''}
-{'3. ✅ **Issue/PR率极低** - 几乎无真实用户互动' if evidence['issue_rate'] + evidence['pr_rate'] >= 40 else ''}
-{'4. ✅ **Fork率过低** - 用户不实际使用项目' if evidence['fork_rate'] > 0 else ''}
+基于多维度证据分析，该仓库存在**明确的Star操纵行为**。
 
 #### 建议:
 - 可向GitHub Support举报
 - 提供本分析报告作为证据
-- 附上可视化图表
 """
     elif total_score >= 60:
-        verdict_md += f"""
-### ⚠️  高度可疑
-
-该仓库存在多个异常指标，**高度怀疑存在刷量行为**。
-
-建议进一步观察并收集更多证据。
-"""
+        verdict_md += "### ⚠️  高度可疑\n\n该仓库存在多个异常指标。\n"
     elif total_score >= 30:
-        verdict_md += f"""
-### ⚠️  中度可疑
-
-存在部分异常指标，需要持续关注。
-
-可能是推广策略导致的非典型增长，但也不排除轻度刷量。
-"""
+        verdict_md += "### ⚠️  中度可疑\n\n存在部分异常指标。\n"
     else:
-        verdict_md += f"""
-### ✅ 正常项目
-
-各项指标均在正常范围内，未发现明显的刷量特征。
-
-该项目的star增长模式符合正常的开源项目规律。
-"""
+        verdict_md += "### ✅ 正常项目\n\n各项指标均在正常范围内。\n"
 
     verdict_md += f"""
-
----
-
-## 📝 技术说明
-
-### 分析方法:
-- **统计学**: scipy层次聚类、Z-score异常检测
-- **数据源**: GitHub公开API
-- **样本量**: 前100个stargazers
-- **聚类方法**: Ward层次聚类
-
-### 准确性:
-- ✅ 基于科学统计方法
-- ✅ 多维度交叉验证
-- ✅ 真实项目测试验证
-
-### 局限性:
-- 仅分析公开数据
-- 需要足够的样本量
-- 无法检测所有刷量手段
-
 ---
 
 **生成工具**: https://github.com/zly2006/fake-star-detector# v2.0  
@@ -388,8 +272,7 @@ def generate_verdict(owner, repo, report_data):
 ## 📎 附件
 
 - 详细数据: `report_{owner}_{repo}.json`
-- 可视化图表: `visualization_{owner}_{repo}.png`
-
+- 可视化图表: ![visualization](visualization_{owner}_{repo}.png)
 """
 
     output_file = f"verdict_{owner}_{repo}.md"
@@ -411,94 +294,68 @@ def analyze_repository(owner, repo):
     print("[1/6] Fetching repository data...")
     repo_r = requests.get(f"https://api.github.com/repos/{owner}/{repo}", headers=HEADERS)
     if repo_r.status_code != 200:
-        print(f"❌ Error: Repository not found or API error ({repo_r.status_code})")
+        print(f"❌ Error: Repository not found ({repo_r.status_code})")
         sys.exit(1)
     
     repo_data = repo_r.json()
     stars = repo_data['stargazers_count']
     forks = repo_data['forks_count']
     
-    # Use Search API to get accurate counts
-    print("[2/6] Fetching issues and PRs (using Search API)...")
+    # Get counts via Search API
+    print("[2/6] Fetching issues and PRs...")
     total_issues = get_total_count_from_search(owner, repo, 'issue')
     total_prs = get_total_count_from_search(owner, repo, 'pr')
     
-    # Calculate rates separately
     issue_rate = total_issues / stars * 100 if stars > 0 else 0
     pr_rate = total_prs / stars * 100 if stars > 0 else 0
     fork_rate = forks / stars * 100 if stars > 0 else 0
     
     print(f"   ✓ Stars: {stars}")
     print(f"   ✓ Forks: {forks} ({fork_rate:.1f}%)")
-    print(f"   ✓ Total Issues: {total_issues} ({issue_rate:.2f}%)")
-    print(f"   ✓ Total PRs: {total_prs} ({pr_rate:.2f}%)")
+    print(f"   ✓ Issues: {total_issues} ({issue_rate:.2f}%)")
+    print(f"   ✓ PRs: {total_prs} ({pr_rate:.2f}%)")
     
     # Evidence scoring
-    evidence_1_score = 0
-    if issue_rate < 1 and stars > 100:
-        evidence_1_score = 30
-        print(f"   🔴 ANOMALY: Issue rate < 1%")
-    elif issue_rate < 2 and stars > 100:
-        evidence_1_score = 15
-        print(f"   🟡 WARNING: Issue rate < 2%")
+    evidence_1_score = 30 if issue_rate < 1 and stars > 100 else (15 if issue_rate < 2 and stars > 100 else 0)
+    evidence_2_score = 20 if pr_rate < 1 and stars > 100 else (10 if pr_rate < 2 and stars > 100 else 0)
+    evidence_3_score = 25 if fork_rate < 8 and stars > 100 else 0
     
-    evidence_2_score = 0
-    if pr_rate < 1 and stars > 100:
-        evidence_2_score = 20
-        print(f"   🔴 ANOMALY: PR rate < 1%")
-    elif pr_rate < 2 and stars > 100:
-        evidence_2_score = 10
-        print(f"   🟡 WARNING: PR rate < 2%")
+    if evidence_1_score >= 30: print(f"   🔴 ANOMALY: Issue rate < 1%")
+    if evidence_2_score >= 20: print(f"   🔴 ANOMALY: PR rate < 1%")
+    if evidence_3_score > 0: print(f"   🔴 ANOMALY: Fork rate < 8%")
     
-    evidence_3_score = 0
-    if fork_rate < 8 and stars > 100:
-        evidence_3_score = 25
-        print(f"   🔴 ANOMALY: Fork rate < 8%")
-    
-    # Check bot commits
+    # Commits
     print(f"\n[3/6] Analyzing commits...")
-    commits_r = requests.get(
-        f"https://api.github.com/repos/{owner}/{repo}/commits",
-        headers=HEADERS, params={"per_page": 100}
-    )
+    commits_r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/commits",
+                            headers=HEADERS, params={"per_page": 100})
     commits = commits_r.json() if commits_r.status_code == 200 else []
-    bot_commits = sum(1 for c in commits 
-                     if 'Update TIME.md' in c.get('commit', {}).get('message', ''))
+    bot_commits = sum(1 for c in commits if 'Update TIME.md' in c.get('commit', {}).get('message', ''))
     bot_ratio = bot_commits / len(commits) * 100 if commits else 0
     
-    print(f"   ✓ Commits (sample): {len(commits)}")
-    print(f"   ✓ Bot Commits: {bot_commits} ({bot_ratio:.0f}%)")
+    print(f"   ✓ Commits: {len(commits)}, Bot: {bot_commits} ({bot_ratio:.0f}%)")
     
-    evidence_4_score = 0
-    if bot_ratio > 80 and len(commits) > 50:
-        evidence_4_score = 30
-        print(f"   🔴 ANOMALY: Bot commits > 80%")
-    elif bot_ratio > 50:
-        evidence_4_score = 15
-        print(f"   🟡 WARNING: Bot commits > 50%")
+    evidence_4_score = 30 if bot_ratio > 80 and len(commits) > 50 else (15 if bot_ratio > 50 else 0)
+    if evidence_4_score >= 30: print(f"   🔴 ANOMALY: Bot commits > 80%")
     
-    # Time interval clustering
-    print(f"\n[4/6] Performing time clustering analysis...")
-    stargazers_r = requests.get(
-        f"https://api.github.com/repos/{owner}/{repo}/stargazers",
-        headers=STAR_HEADERS, params={"per_page": 100}
-    )
+    # Clustering
+    print(f"\n[4/6] Time clustering analysis...")
+    stargazers_r = requests.get(f"https://api.github.com/repos/{owner}/{repo}/stargazers",
+                                headers=STAR_HEADERS, params={"per_page": 100})
     stargazers = stargazers_r.json() if stargazers_r.status_code == 200 else []
     
     evidence_5_score = 0
     main_cluster_info = {}
+    intervals_min = None
+    times = None
+    clusters = None
+    max_clusters = 0
     
     if len(stargazers) >= 20:
-        print(f"   ✓ Analyzing {len(stargazers)} stargazers...")
-        
-        times = sorted([datetime.strptime(s['starred_at'], '%Y-%m-%dT%H:%M:%SZ') 
-                       for s in stargazers])
-        intervals = np.array([(times[i] - times[i-1]).total_seconds() 
-                             for i in range(1, len(times))])
-        
+        times = sorted([datetime.strptime(s['starred_at'], '%Y-%m-%dT%H:%M:%SZ') for s in stargazers])
+        intervals = np.array([(times[i] - times[i-1]).total_seconds() for i in range(1, len(times))])
         intervals_min = intervals / 60
-        X = intervals_min.reshape(-1, 1)
         
+        X = intervals_min.reshape(-1, 1)
         linkage_matrix = linkage(X, method='ward')
         max_clusters = min(8, len(intervals) // 10)
         clusters = fcluster(linkage_matrix, t=max_clusters, criterion='maxclust')
@@ -514,50 +371,39 @@ def analyze_repository(owner, repo):
                     'percentage': len(cluster_data) / len(intervals) * 100
                 }
         
-        sorted_clusters = sorted(cluster_info.items(), 
-                                key=lambda x: x[1]['count'], reverse=True)
+        sorted_clusters = sorted(cluster_info.items(), key=lambda x: x[1]['count'], reverse=True)
         main_cluster_info = sorted_clusters[0][1]
         
         print(f"   ✓ Main cluster: {main_cluster_info['count']} samples, std={main_cluster_info['std']:.1f}min")
         
         if main_cluster_info['std'] < 5 and main_cluster_info['count'] >= 10:
             evidence_5_score = 50
-            print(f"   🔴 CRITICAL: Automated pattern detected!")
+            print(f"   🔴 CRITICAL: Automated pattern!")
         elif main_cluster_info['std'] < 10 and main_cluster_info['percentage'] > 30:
             evidence_5_score = 25
-            print(f"   🟡 WARNING: Regular pattern")
     else:
         print(f"   ⚠️  Insufficient data")
     
-    # Check bulk creation
-    print(f"\n[5/6] Checking repository patterns...")
-    user_repos_r = requests.get(
-        f"https://api.github.com/users/{owner}/repos",
-        headers=HEADERS, params={"per_page": 100}
-    )
+    # Bulk creation
+    print(f"\n[5/6] Checking patterns...")
+    user_repos_r = requests.get(f"https://api.github.com/users/{owner}/repos",
+                                headers=HEADERS, params={"per_page": 100})
     all_repos = user_repos_r.json() if user_repos_r.status_code == 200 else []
     
     high_star_repos = [r for r in all_repos if r['stargazers_count'] > 50]
     created_dates = defaultdict(list)
-    
     for r in high_star_repos:
-        date = r['created_at'][:10]
-        created_dates[date].append(r['stargazers_count'])
+        created_dates[r['created_at'][:10]].append(r['stargazers_count'])
     
     bulk_dates = {d: sum(s) for d, s in created_dates.items() if len(s) >= 2}
+    evidence_6_score = 25 if any(len(s) >= 3 for s in created_dates.values()) else (10 if bulk_dates else 0)
     
-    evidence_6_score = 0
-    if bulk_dates:
-        print(f"   ✓ Found {len(bulk_dates)} bulk creation dates")
-        if any(len(s) >= 3 for s in created_dates.values()):
-            evidence_6_score = 25
-            print(f"   🔴 ANOMALY: Multiple repos/day")
-        else:
-            evidence_6_score = 10
+    if evidence_6_score > 0:
+        print(f"   ✓ Found {len(bulk_dates)} bulk dates")
     
-    # Calculate total
-    total_score = (evidence_1_score + evidence_2_score + evidence_3_score + 
-                   evidence_4_score + evidence_5_score + evidence_6_score)
+    # Total
+    total_score = sum([evidence_1_score, evidence_2_score, evidence_3_score, 
+                      evidence_4_score, evidence_5_score, evidence_6_score])
     
     print(f"\n[6/6] Saving report...")
     
@@ -569,13 +415,9 @@ def analyze_repository(owner, repo):
         'analysis_date': datetime.now().isoformat(),
         'repository': f"{owner}/{repo}",
         'metrics': {
-            'stars': stars,
-            'forks': forks,
-            'fork_rate': fork_rate,
-            'total_issues': total_issues,
-            'issue_rate': issue_rate,
-            'total_prs': total_prs,
-            'pr_rate': pr_rate,
+            'stars': stars, 'forks': forks, 'fork_rate': fork_rate,
+            'total_issues': total_issues, 'issue_rate': issue_rate,
+            'total_prs': total_prs, 'pr_rate': pr_rate,
             'bot_commit_ratio': bot_ratio,
             'main_cluster': main_cluster_info
         },
@@ -595,11 +437,13 @@ def analyze_repository(owner, repo):
     output_file = f"report_{owner}_{repo}.json"
     with open(output_file, 'w') as f:
         json.dump(report, f, indent=2)
-    
     print(f"   ✓ Saved: {output_file}")
     
-    # Generate visualization and verdict
-    create_visualization(owner, repo, report)
+    # Visualization
+    if intervals_min is not None and times is not None:
+        create_visualization(owner, repo, report, stargazers, intervals_min, times, clusters, max_clusters)
+    
+    # Verdict
     generate_verdict(owner, repo, report)
     
     print(f"\n{'='*70}")
@@ -610,10 +454,6 @@ def analyze_repository(owner, repo):
 if __name__ == "__main__":
     if len(sys.argv) != 3:
         print("Usage: python3 final.py <owner> <repo>")
-        print("Example: python3 final.py XiaomingX indie-hacker-tools-plus")
         sys.exit(1)
     
-    owner = sys.argv[1]
-    repo = sys.argv[2]
-    
-    analyze_repository(owner, repo)
+    analyze_repository(sys.argv[1], sys.argv[2])
