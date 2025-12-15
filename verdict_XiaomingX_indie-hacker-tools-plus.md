@@ -1,6 +1,6 @@
 # 分析报告 - XiaomingX/indie-hacker-tools-plus
 
-> **生成时间**: 2025-12-15 19:10:39
+> **生成时间**: 2025-12-15 19:11:45
 
 ---
 
@@ -90,7 +90,7 @@
 ---
 
 **生成工具**: https://github.com/zly2006/fake-star-detector# v2.0  
-**分析时间**: 2025-12-15 19:10:39  
+**分析时间**: 2025-12-15 19:11:45  
 **报告格式**: Markdown
 
 ---
@@ -98,4 +98,4 @@
 ## 📎 附件
 
 - 详细数据: `report_XiaomingX_indie-hacker-tools-plus.json`
-- 可视化图表: `visualization_XiaomingX_indie-hacker-tools-plus.png`
+- 可视化图表: ![visualization](visualization_XiaomingX_indie-hacker-tools-plus.png)
