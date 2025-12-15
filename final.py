@@ -49,10 +49,9 @@ def create_visualization(owner, repo, report_data, stargazers_data, intervals_mi
     metrics = report_data['metrics']
     main_cluster = metrics.get('main_cluster', {})
     
-    # Calculate half-hour peak
-    star_minutes = [t.minute for t in times]
-    near_half = sum(1 for m in star_minutes if 25 <= m <= 35)
-    half_hour_pct = near_half / len(times) * 100
+    # Get chi-square test results if available
+    chi2_p_value = main_cluster.get('chi2_p_value', None)
+    expected_std = main_cluster.get('expected_std', None)
     
     # Filter data for plot 1: only show intervals < 500 minutes
     intervals_filtered = intervals_min[intervals_min < 500]
@@ -126,6 +125,18 @@ def create_visualization(owner, repo, report_data, stargazers_data, intervals_mi
     fork_status = "Suspicious: < 8%" if metrics['fork_rate'] < 8 else "OK"
     bot_status = "Suspicious: > 80%" if metrics['bot_commit_ratio'] > 80 else "OK"
     
+    # Chi-square test status
+    if chi2_p_value is not None:
+        if chi2_p_value < 0.01:
+            chi2_status = "🔴 Highly Concentrated"
+        elif chi2_p_value < 0.05:
+            chi2_status = "🟡 Concentrated"
+        else:
+            chi2_status = "🟢 Random"
+        chi2_line = f"• Chi² p-value: {chi2_p_value:.4f} ({chi2_status})"
+    else:
+        chi2_line = "• Chi² p-value: N/A"
+    
     metrics_text = f"""
 KEY EVIDENCE SUMMARY
 
@@ -140,7 +151,7 @@ Time Pattern Analysis:
 • Main Cluster: {main_cluster['percentage']:.1f}%
 • Mean Interval: {main_cluster['mean']:.1f} min
 • Std Deviation: {main_cluster['std']:.1f} min
-• Half-hour Peak: {half_hour_pct:.0f}%
+{chi2_line}
 
 Suspicion Score: {report_data['suspicion_score']}/{report_data['max_score']}
     """
@@ -276,12 +287,6 @@ def generate_verdict(owner, repo, report_data):
 ### 6. 批量创建分析 ({evidence['bulk_creation']} 分)
 
 - **判定**: {'🔴 异常 - 发现批量创建' if evidence['bulk_creation'] > 0 else '🟢 正常'}
-
-### 7. 集中性检验 ({evidence['anova_significance']} 分) ⭐ 统计证据
-
-- **判定**: {'🔴 高度显著 - 数据极度集中 (p<0.01)' if evidence['anova_significance'] >= 20 else '🟡 显著 - 数据呈现集中性 (p<0.05)' if evidence['anova_significance'] >= 10 else '🟢 数据符合随机分布'}
-
-{'**说明**: 卡方检验证实数据的标准差显著小于随机期望值，说明时间间隔不是自然发生的，具有明确的规律性和可控性，指向自动化程序。' if evidence['anova_significance'] >= 20 else '**说明**: 数据显示一定的集中性，存在规律性倾向。' if evidence['anova_significance'] >= 10 else '**说明**: 数据波动正常，符合自然随机分布。'}
 
 ---
 
