@@ -97,10 +97,10 @@ def create_visualization(owner, repo, report_data, stargazers_data, intervals_mi
     ax4.axis('off')
     
     # Determine status indicators
-    issue_status = "🔴 < 1%" if metrics['issue_rate'] < 1 else "🟢 OK"
-    pr_status = "🔴 < 1%" if metrics['pr_rate'] < 1 else "🟢 OK"
-    fork_status = "🔴 < 8%" if metrics['fork_rate'] < 8 else "🟢 OK"
-    bot_status = "🔴 > 80%" if metrics['bot_commit_ratio'] > 80 else "🟢 OK"
+    issue_status = "Suspicious: < 1%" if metrics['issue_rate'] < 1 else "OK"
+    pr_status = "Suspicious: < 1%" if metrics['pr_rate'] < 1 else "OK"
+    fork_status = "Suspicious: < 8%" if metrics['fork_rate'] < 8 else "OK"
+    bot_status = "Suspicious: > 80%" if metrics['bot_commit_ratio'] > 80 else "OK"
     
     metrics_text = f"""
 KEY EVIDENCE SUMMARY
