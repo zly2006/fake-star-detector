@@ -2,9 +2,9 @@
 
 > 基于科学统计方法的GitHub仓库Star操纵行为检测系统
 
-![可视化证据](star_manipulation_evidence.png)
+![可视化证据](visualization_XiaomingX_indie-hacker-tools-plus.png)
 
-## �� 快速开始
+## 快速开始
 
 ```bash
 # 1. 克隆仓库
@@ -14,22 +14,19 @@ cd fake-star-detector
 # 2. 配置Token
 echo "GITHUB_TOKEN=your_token_here" > .env
 
-# 3. 安装依赖
-uv pip install requests numpy scipy matplotlib python-dotenv
-
-# 4. 运行分析
-python3 final.py <owner> <repo>
+# 3. 运行分析
+uv run final.py <owner> <repo>
 ```
 
 ### 示例
 
 ```bash
 # 分析可疑仓库
-python3 final.py XiaomingX indie-hacker-tools-plus
+uv run final.py XiaomingX indie-hacker-tools-plus
 # 结果: 150/165 🔴 HIGH SUSPICION
 
 # 分析真实仓库
-python3 final.py zly2006 zhihu-plus-plus
+uv run final.py zly2006 zhihu-plus-plus
 # 结果: 0/165 🟢 LOW SUSPICION
 ```
 
@@ -320,28 +317,6 @@ Evidence:
 2. 获取生成的 `report_<owner>_<repo>.json`
 3. 准备可视化图片（如果有）
 4. 前往 [GitHub Support](https://support.github.com/contact)
-
-### 举报模板
-
-```
-Subject: Report Suspected Star Manipulation
-
-Repository: <owner>/<repo>
-Analysis Date: <date>
-
-Key Evidence:
-1. Interaction Rate: <rate>% (Normal: >3%)
-2. Bot Commits: <percentage>%
-3. Time Clustering: std=<std> minutes (statistically impossible for humans)
-
-Suspicion Score: <score>/165
-
-Analysis Method: scipy hierarchical clustering, statistical analysis
-Supporting Data: [Attach JSON report]
-
-This repository violates GitHub's Terms of Service regarding
-artificial engagement manipulation.
-```
 
 ---
 

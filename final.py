@@ -41,7 +41,7 @@ def get_total_count_from_search(owner, repo, item_type):
         return 0
 
 def create_visualization(owner, repo, report_data, stargazers_data, intervals_min, times, clusters, max_clusters):
-    """Create 4-panel visualization - EXACTLY as specified"""
+    """Create 4-panel visualization"""
     print(f"\n[7/8] Creating visualization...")
     
     metrics = report_data['metrics']
@@ -52,19 +52,25 @@ def create_visualization(owner, repo, report_data, stargazers_data, intervals_mi
     near_half = sum(1 for m in star_minutes if 25 <= m <= 35)
     half_hour_pct = near_half / len(times) * 100
     
+    # Filter data for plot 1: only show intervals < 500 minutes
+    intervals_filtered = intervals_min[intervals_min < 500]
+    in_range_count = len(intervals_filtered)
+    total_count = len(intervals_min)
+    in_range_pct = in_range_count / total_count * 100
+    
     # Create figure
     fig, axes = plt.subplots(2, 2, figsize=(14, 10))
     fig.suptitle(f'Star Manipulation Evidence - {owner}/{repo}', 
                  fontsize=16, fontweight='bold')
     
-    # Plot 1: Interval Distribution
+    # Plot 1: Interval Distribution (< 500 min only)
     ax1 = axes[0, 0]
-    ax1.hist(intervals_min, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
+    ax1.hist(intervals_filtered, bins=30, color='steelblue', edgecolor='black', alpha=0.7)
     ax1.axvline(main_cluster['mean'], color='red', linestyle='--', linewidth=2,
                label=f"Main cluster: {main_cluster['mean']:.1f} min")
     ax1.set_xlabel('Time Interval (minutes)')
     ax1.set_ylabel('Frequency')
-    ax1.set_title('Star Time Interval Distribution')
+    ax1.set_title(f'Star Time Interval Distribution (<500 min)\n{in_range_count}/{total_count} stars ({in_range_pct:.1f}%) in this range')
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
